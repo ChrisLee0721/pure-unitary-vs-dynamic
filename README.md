@@ -45,7 +45,7 @@ python analysis/plot_results.py
 ```bibtex
 @article{lee2026unitary,
   title={Quantum Algorithms Do Not Need Classical Control},
-  author={[Authors TBD]},
+  author={Lee, Lap-Yuen},
   journal={[Journal TBD]},
   year={2026}
 }
