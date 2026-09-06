@@ -1,0 +1,603 @@
+\documentclass[11pt]{article}
+
+% Nature style
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{times}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage[numbers]{natbib}
+\usepackage{lineno}
+\usepackage{float}
+\linenumbers
+
+\title{Static Unitary Compilation Outperforms Dynamic Feedback on NISQ Hardware: A Physics-Based Roadmap}
+
+\author{
+  Lee Lap-Yuen\\
+  Vocational Training Council, Hong Kong SAR, China\\
+  \texttt{Christina\_Llap\_Yuen@Outlook.com}
+}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+The textbook equivalence between measurement-feedback and controlled gates is exact at the operator level.
+We show that it breaks under noise: two mathematically identical implementations diverge asymptotically because measurement projection (irreversible) and gate errors (unitary) are non-commuting noise channels.
+We formalize this as a generalized decision boundary: pure unitary compilation outperforms dynamic execution whenever $(c{-}1)d < |\ln \mathcal{T}|/|\ln F_{\text{eff}}|$, where $c$ is the controlled-gate compilation overhead, $d$ is the bare unitary depth, and $\mathcal{T}$ is the \textbf{measurement tax}---the per-step fidelity cost of a mid-circuit measurement-feedback cycle.
+On IBM's 156-qubit Heron processor, we measure $\mathcal{T} \approx 0.83$, equivalent to $\sim$36 CNOT gates of error budget, and an operational breakpoint $N^* \approx 4$---the conditional depth at which dynamic execution drops below~50\% fidelity.
+We verify the predicted monotonic divergence to $N = 31$, where the dynamic approach yields zero counts while pure unitary retains 0.9\% fidelity.
+All four classical control structures (for, if, switch, while) compile to pure unitary circuits, validated on four quantum platforms.
+Projecting across hardware generations, the measurement tax is fixed by physics while gate fidelity improves with engineering; when $F_{\text{gate}}$ reaches 99.99\%, the pure unitary approach maintains a $\sim$30$\times$ depth advantage, rendering dynamic execution suboptimal for all practical circuit depths.
+\end{abstract}
+
+\section{Introduction}
+
+The classical-quantum hybrid model of computation---in which mid-circuit measurements extract classical information and condition subsequent quantum operations---is mathematically complete: it can express any computable function that a pure quantum circuit can~\cite{deutsch1985}.
+This model underpins IBM's dynamic circuits~\cite{ibm_dynamic,ibm_blog2025}, Google's mid-circuit measurement platform, and the OpenQASM 3 language~\cite{openqasm3}.
+The question we address is not whether this model is \emph{correct}, but whether it is \emph{optimal}---specifically, whether there exists a regime of circuit depth where an alternative implementation strategy yields strictly higher fidelity on the same hardware.
+
+The textbook equivalence between measurement-feedback and controlled gates is exact at the operator level.
+We show that it is \emph{not} exact in the presence of noise: two implementations that are mathematically identical diverge asymptotically under physically realistic noise channels.
+The measurement-feedback path compounds a per-step tax ($\mathcal{T} \approx 0.83$) from projection and decoherence; the pure unitary path compounds only gate errors ($F_{\text{gate}} \approx 0.995$).
+Because these two noise channels are non-commuting---measurement projection is irreversible while gate errors are unitary---the asymptotic fidelity of equivalent implementations follows different scaling laws, and the gap widens monotonically with circuit depth.
+
+The answer follows from an asymmetry between two noise channels.
+Gate errors scale with materials engineering: improvements in fabrication, calibration, and control electronics reduce $1 - F_\text{gate}$ exponentially over hardware generations.
+Measurement errors, by contrast, are bounded below by the physics of quantum measurement itself: extracting classical information from a quantum system necessarily projects the measured mode onto a classical basis, destroying coherence irreversibly.
+Even with perfect readout fidelity, the feedback latency between measurement and conditional gate application introduces decoherence at rate $1/T_2$ in all idle qubits, a cost that has a physical floor set by the dispersive readout mechanism ($\gtrsim 100\,$ns).
+The ratio of these two noise channels---improving gate fidelity versus stationary measurement tax---means that pure unitary execution outperforms dynamic execution at every conditional depth $N \geq 1$.
+The advantage compounds: at $N \approx 4$ (on current hardware), the dynamic approach drops below~50\% fidelity, an \textbf{operational breakpoint} $N^*$ beyond which dynamic execution becomes unreliable.
+
+Three lines of prior work motivate this analysis but leave a gap.
+Harper et al.~\cite{harper2026} quantified MCM-induced idling noise as the primary failure mechanism on IBM Heron, and benchmarking protocols~\cite{hothem2025} and optimization frameworks~\cite{mcm_opt2025} have been developed to minimize MCM costs---establishing the \emph{problem}.
+Jacobs et al.~\cite{jacobs2014} established the theoretical superiority of coherent control in quantum measurement theory, showing that coherent feedback protocols exploit geodesic paths in Hilbert space that measurement-based protocols cannot follow---establishing the \emph{theory}.
+Measurement-free QEC---demonstrated experimentally by Butt et al.~\cite{butt2026} on trapped-ion processors and formalized theoretically by Veroni et al.~\cite{veroni2025} using Bacon-Shor codes---establishes that mid-circuit measurement can be avoided at the error-correction layer---establishing the \emph{precedent}.
+Yet none of these works addresses the \emph{algorithmic control-flow} layer---the level of \texttt{if}, \texttt{while}, and \texttt{switch} statements in quantum programs---nor provides a hardware-aware criterion for when to choose pure unitary execution over dynamic execution.
+
+We fill this gap with three contributions.
+
+\textbf{First}, we provide a compilation framework: all four classical control structures (for, if, switch, while) can be compiled to pure unitary circuits when the relevant quantum predicates are retained coherently~\cite{nielsen2010}.
+While the individual transformations for \texttt{for}, \texttt{if}, and \texttt{switch} are standard in circuit synthesis, the key feasibility result is the \texttt{while} loop: a measure-and-branch loop can be replaced by amplitude amplification---a single unitary rotation that produces the same final measurement distribution.
+This has been validated end-to-end in the QuoNic middleware~\cite{quonic2026}: repeat-until-success circuits compiled via \texttt{groverize()} were executed on four quantum platforms spanning three hardware modalities, achieving TVD $< 0.03$ against noiseless simulation.
+
+\textbf{Second}, we measure the decision boundary parameters on IBM's ibm\_marrakesh processor (156-qubit Heron) by comparing two implementations of $N$ conditional operations under identical conditions (Figure~\ref{fig:compilation}):
+\begin{enumerate}
+  \item \textbf{Dynamic}: mid-circuit measurement of the control qubit, classical conditional branch, and conditional gate application ($N$ times).
+  \item \textbf{Pure unitary}: $N$ CNOT gates from the control qubit to each target, preserving coherence throughout.
+\end{enumerate}
+The dynamic implementation follows the standard approach used in current IBM hardware; it is not optimized, nor is it the worst case.
+The pure unitary implementation is the minimal coherent equivalent.
+With identical hardware, calibration, physical qubit layout, and no error mitigation, we measure $N^* \approx 4$ and verify the predicted monotonic divergence to $N = 31$.
+
+\textbf{Third}, we derive a generalized decision boundary.
+The per-step fidelity ratio is $\sim$1.20, independent of the controlled operation's depth (Equation~\ref{eq:ratio}), and yields a closed-form threshold: pure unitary compilation wins when $(c{-}1)d < |\ln\mathcal{T}|/|\ln F_{\text{eff}}|$, where $c$ is the compilation overhead factor, $d$ is the bare unitary depth, $\mathcal{T}$ is the measurement tax, and $F_{\text{eff}}$ is the path-specific effective fidelity of the controlled synthesis.
+For native CNOT gates on IBM Heron, $F_{\text{eff}} = F_{\text{gate}} \approx 0.995$ and the threshold is~36; for complex controlled operations requiring SWAP chains or ancilla gates, $F_{\text{eff}}$ is lower and the threshold shrinks accordingly.
+Because gate fidelity improves with engineering while the measurement tax is physics-bounded, the measurement tax becomes relatively more severe across hardware generations, and the dynamic approach becomes unusable at ever-shallower depths.
+We project that when gate fidelity reaches 99.99\%---a realistic near-term target---the threshold expands to $(c{-}1)d < 1800$, rendering dynamic execution suboptimal at all practical circuit depths.
+
+The implications are concrete.
+The threshold $(c{-}1)d < |\ln\mathcal{T}|/|\ln F_{\text{eff}}|$ gives compilers a quantitative decision rule; hardware roadmaps should weight gate fidelity improvement over mid-circuit measurement speed.
+Notably, the processor's qubit count does not appear explicitly in this criterion---it enters only through $F_{\text{eff}}$---making the framework platform-independent.
+The measurement tax~$\mathcal{T}$ plays a role analogous to Landauer's bound ($kT\ln 2$): it converts an architectural choice into a calculable physical cost, setting a lower bound that no engineering optimization can circumvent.
+
+\section{Results}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{fig1_compilation.pdf}
+\caption{Compilation framework: the four classical control structures compile to pure unitary circuits when the relevant quantum predicates are retained coherently and measurement is deferred. Each row maps one classical construct to its unitary replacement: \texttt{if} to a controlled unitary, \texttt{switch} to a multiplexer, \texttt{for} to an unrolled gate sequence, and \texttt{while} (highlighted) to amplitude amplification. The right-hand control is the original pre-measurement quantum predicate, not a classical measurement result re-encoded as a qubit. The compilation preserves the final measurement distribution while eliminating all mid-circuit measurements.}
+\label{fig:compilation}
+\end{figure}
+
+\subsection{The Compilation Framework}
+\label{sec:compilation}
+
+We consider programs whose semantics are defined by the distribution of final measurement outcomes.
+This includes virtually all quantum algorithms: Grover's search, Shor's factoring, variational quantum eigensolvers, and quantum simulation.
+For such programs, any classical control flow that does not affect the final measurement distribution can be replaced by unitary operations.
+
+The first three control structures admit standard transformations\cite{nielsen2010} when measurement of the predicate is deferred: \texttt{for} loops unroll into gate sequences; \texttt{if} statements become controlled gates (e.g., CNOT); \texttt{switch} statements become multiplexer unitaries $M = \sum_j |j\rangle\langle j| \otimes U_j$.
+The \texttt{while} loop is the only structure that genuinely requires runtime control flow.
+We replace it with amplitude amplification: a single unitary rotation that produces the same final measurement distribution.
+For repeated Hadamard-and-measure (termination probability 1/2 per iteration), $N$ iterations yield $P(0) = 1 - (1/2)^N$; the equivalent unitary is $RY(\theta)$ with $\theta = 2\arcsin\sqrt{1 - (1/2)^N}$, requiring one gate instead of $N$ measurement-feedback cycles.
+
+\subsection{Experimental Comparison}
+
+The dynamic circuit paradigm is \emph{defined} by mid-circuit measurement followed by classical feedback: measure, decode, conditionally apply.
+The pure unitary paradigm is \emph{defined} by coherent control: a controlled gate executes the same logic without measurement.
+We compare these two paradigms in their minimal forms---measure-then-conditional-X versus CNOT---to isolate the cost that measurement-and-feedback intrinsically carries, stripped of all other variables.
+Any additional complexity (error mitigation, qubit routing, pulse optimization) is orthogonal to this comparison; it improves both approaches equally and does not alter the fundamental asymmetry.
+
+We fix the control qubit $q_0 = |1\rangle$ throughout.
+This means both circuits perform the \emph{identical} task---applying $X$ to $N$ target qubits---and differ only in \emph{how} the conditional operation is realized: via measurement-feedback (dynamic) or via CNOT (pure unitary).
+Any measured fidelity difference therefore arises \emph{solely} from the measurement-feedback process itself (readout error, feedback latency, and decoherence during feedback), which is a hardware property independent of the measurement outcome.
+The compilation of nondeterministic branches into controlled unitaries is a separate concern, addressed by the compilation framework (Section~\ref{sec:compilation}).
+
+\paragraph{Program.}
+For each $N \in \{1, 2, \ldots, 23\}$:
+\begin{itemize}
+  \item Set qubit $q_0 = |1\rangle$.
+  \item For $i = 1, \ldots, N$: if $q_0 == 1$, apply $X$ to $q_i$.
+  \item Measure all qubits. The ideal output is $|1\rangle^{\otimes(N+1)}$.
+\end{itemize}
+
+\paragraph{Dynamic implementation.}
+Each conditional operation is implemented as:
+\begin{enumerate}
+  \item Measure $q_0$ into a classical register.
+  \item If the measurement result is 1, apply $X(q_i)$.
+\end{enumerate}
+After $N$ iterations, $q_0$ has been measured $N$ times, collapsing it to $|0\rangle$ after the first measurement that yields 0.
+The classical conditional then prevents all subsequent $X$ gates from firing.
+
+\paragraph{Pure unitary implementation.}
+Each conditional operation is implemented as CNOT($q_0, q_i$).
+The control qubit $q_0$ is never measured; its coherence is preserved throughout.
+All $N$ CNOT gates execute in a single coherent circuit.
+
+\paragraph{Experimental controls.}
+All experiments use:
+\begin{itemize}
+  \item Fixed physical qubit layout: [0, 1, 2, \ldots, 15, 19, 35] (a connected chain on the device).
+  \item Dynamical decoupling: OFF.
+  \item Twirling (gates and measurement): OFF.
+  \item 4000 shots per circuit.
+  \item Batch submission: all $N$ values submitted in a single job to minimize calibration drift.
+\end{itemize}
+Our dynamic implementation follows the standard approach used in current IBM hardware: measure the control qubit into a classical register, then conditionally apply the target gate.
+We make no claim that this is the optimal implementation of conditional operations; it is the \emph{standard} implementation, and our comparison reflects the practical reality of today's dynamic circuits.
+
+\subsection{Scaling Results}
+
+Figure~\ref{fig:scaling} shows the probability of the ideal outcome as a function of $N$.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{fig3_scaling.pdf}
+\caption{Main experimental results (semi-log scale). Probability of the ideal outcome as a function of~$N$ for dynamic and pure unitary implementations on IBM ibm\_marrakesh (4000 shots, 95\% Wilson confidence intervals). Dashed lines: exponential reference models based on the assumed per-step fidelities. The advantage grows monotonically: 9.5$\times$ at $N{=}17$, 43$\times$ at $N{=}23$. The dynamic circuit enters the dead zone ($<$1\%) by $N{\approx}23$; the pure unitary approach remains experimentally viable at 17\%.}
+\label{fig:scaling}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Probability of ideal outcome ($|1\rangle^{\otimes(N+1)}$) for dynamic and pure unitary implementations, with transpiled circuit depths on IBM ibm\_marrakesh.}
+\label{tab:results}
+\begin{tabular}{@{}rrrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{Circuit depth} & \multicolumn{2}{c}{Fidelity} & \\
+$N$ & Dynamic & Pure Unitary & Dynamic & Pure Unitary & Relative \\
+\midrule
+1  &   4 &   9 & 92.4\% & 96.9\% & 1.05$\times$ \\
+3  &   8 &  27 & 80.3\% & 93.5\% & 1.16$\times$ \\
+5  &  12 &  45 & 62.5\% & 85.0\% & 1.36$\times$ \\
+7  &  16 &  66 & 49.3\% & 79.4\% & 1.61$\times$ \\
+9  &  20 &  81 & 34.6\% & 70.4\% & 2.03$\times$ \\
+11 &  24 &  99 & 18.0\% & 62.6\% & 3.48$\times$ \\
+13 &  28 & 120 & 11.4\% & 46.0\% & 4.03$\times$ \\
+15 &  32 & 135 &  6.8\% & 42.1\% & 6.24$\times$ \\
+17 &  36 & 156 &  4.1\% & 38.9\% & 9.49$\times$ \\
+\bottomrule
+\end{tabular}
+\\[3pt]
+\footnotesize{Depths are after transpilation with optimization level 1 and fixed qubit layout. The pure unitary circuit is $\sim$4$\times$ deeper because each CNOT requires SWAP-based routing on the linear qubit chain; the dynamic circuit uses single-qubit conditional gates that require no routing. Despite being deeper, the pure unitary approach achieves up to 43$\times$ higher fidelity---the measurement-feedback penalty dominates over the gate depth penalty.}
+\end{table}
+Counterintuitively, the pure unitary circuit is $\sim$4$\times$ \emph{deeper} than the dynamic circuit after transpilation (Table~\ref{tab:results}), because each CNOT requires SWAP-based routing on the linear qubit chain.
+Yet the pure unitary approach achieves up to 43$\times$ higher fidelity.
+The measurement-feedback penalty ($F_\text{meas} \times e^{-T_\text{fb}/T_2} \approx 0.83$ per step) dominates over the gate depth penalty ($F_\text{gate} \approx 0.995$ per gate) by more than an order of magnitude.
+
+The advantage grows monotonically.
+At $N=1$, the difference is modest (4.5\%).
+By $N=9$, it has grown to 35.8\%.
+At $N=17$, the dynamic approach has collapsed to 4.1\%---essentially random noise for a 18-qubit output---while the pure unitary approach remains at 38.9\%.
+At $N=23$, the gap widens to43$\times$: the dynamic approach (0.4\%) is indistinguishable from noise, while the pure unitary approach (17.3\%) remains experimentally viable.
+By $N=25$, the dynamic approach yields zero counts (0/4000 shots), while the pure unitary approach still yields4.9\% at $N=25$ and 0.9\% at $N=31$ (Table~\ref{tab:extend}).
+
+\begin{table}[h]
+\centering
+\caption{Extended results ($N=18$--31). Dynamic yields zero counts by $N=25$ (0/4000 shots); upper bounds are99.99\% confidence intervals. Pure unitary remains measurable at $N=31$.}
+\label{tab:extend}
+\begin{tabular}{@{}rrrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{Circuit depth} & \multicolumn{2}{c}{Fidelity} & \\
+$N$ & Dynamic & Pure Unitary & Dynamic & Pure Unitary & Relative \\
+\midrule
+18 & 38 & 162 & 2.5\% & 33.2\% & 13.3$\times$ \\
+19 & 40 & 174 & 2.1\% & 30.4\% & 14.5$\times$ \\
+20 & 42 & 180 & 1.3\% & 29.0\% & 22.3$\times$ \\
+21 & 44 & 192 & 1.1\% & 24.5\% & 22.3$\times$ \\
+22 & 46 & 213 & 0.6\% & 18.1\% & 30.2$\times$ \\
+23 & 48 & 221 & 0.4\% & 17.3\% & 43.3$\times$ \\
+25 & 52 & 240 & $<$0.4\% & 4.9\% & $>$12$\times$ \\
+27 & 56 & 247 & $<$0.4\% & 2.4\% & $>$6$\times$ \\
+29 & 60 & 265 & $<$0.4\% & 0.88\% & $>$2$\times$ \\
+31 & 64 & 267 & $<$0.4\% & 0.90\% & $>$2$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The per-step fidelity difference compounds into a dramatic gap in \emph{executable depth}---the number of conditional operations a circuit can sustain before fidelity drops below a usable threshold.
+Defining executable depth as the number of steps $n$ such that $F_\text{step}^n \geq 0.1$, we project this advantage across hardware generations (Table~\ref{tab:depth}, Figure~\ref{fig:depth}).
+\begin{table}[h]
+\centering
+\caption{Executable depth (steps to 10\% fidelity) across hardware generations.}
+\label{tab:depth}
+\begin{tabular}{lccc}
+\hline
+ & \textbf{2026} & \textbf{2029 (est.)} & \textbf{2036 (est.)} \\
+\hline
+Dynamic & 13 & 87 & 767 \\
+Pure unitary & 459 & 2{,}302 & 23{,}023 \\
+\textbf{Depth advantage} & \textbf{35}$\times$ & \textbf{26}$\times$ & \textbf{30}$\times$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\textwidth]{fig2_depth_projection.pdf}
+\caption{Executable depth projection across hardware generations. The pure unitary approach sustains $\sim$30$\times$ more conditional operations before fidelity drops below 10\%. The advantage persists across generations because both approaches improve with better hardware---hardware progress raises the scale, not closes the gap.}
+\label{fig:depth}
+\end{figure}
+
+The depth advantage remains roughly constant ($\sim$30$\times$) across generations because both approaches improve with better hardware.
+But the \emph{absolute} depths grow dramatically: a 2036 processor can run circuits with $N \approx 1000$ conditional operations.
+For such a circuit, the dynamic approach yields $0.997^{1000} \approx 5\%$ fidelity---effectively dead---while the pure unitary approach yields $0.9999^{1000} \approx 90.5\%$ fidelity.
+Hardware progress does not close the gap; it raises the scale at which the gap becomes decisive.
+
+\subsection{Physical Analysis}
+
+The fidelity advantage arises from a fundamental asymmetry in noise sources (Figure~\ref{fig:noise}).
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.8\textwidth]{fig4_noise_budget.pdf}
+\caption{Cumulative effect of the measurement tax (semi-log scale). The dynamic circuit compounds gate error, measurement error, and feedback decoherence, giving $F_\text{step}^\text{dyn} \approx 0.83$; the pure unitary circuit incurs only gate error, giving $F_\text{step}^\text{uni} \approx 0.995$. The dynamic approach reaches 50\% at $N{=}4$, while the pure unitary approach reaches 50\% at $N{=}138$ (outside the plotted range), a 34$\times$ depth advantage.}
+\label{fig:noise}
+\end{figure}
+
+\paragraph{Dynamic circuit noise budget.}
+Each conditional operation consists of:
+\begin{enumerate}
+  \item Measurement: $F_\text{meas} \approx 0.99$
+  \item Classical feedback latency: $T_\text{fb} \approx 34\,\mu$s (including readout, decode, and feedforward)
+  \item Conditional gate: $F_\text{gate} \approx 0.995$
+\end{enumerate}
+During the feedback period, the qubits decohere at rate $1/T_2$, contributing $\exp(-T_\text{fb}/T_2) \approx \exp(-34/200) \approx 0.84$.
+The total per-step fidelity is:
+\begin{equation}
+F_\text{step}^\text{dyn} = F_\text{gate} \times F_\text{meas} \times e^{-T_\text{fb}/T_2} \approx 0.995 \times 0.99 \times 0.84 \approx 0.83
+\end{equation}
+After $N$ steps: $F^\text{dyn} \approx 0.83^N$.
+
+\paragraph{Pure unitary noise budget.}
+Each CNOT gate contributes $F_\text{gate} \approx 0.995$.
+No measurement, no feedback, no decoherence penalty.
+After $N$ gates: $F^\text{uni} \approx 0.995^N$.
+
+\paragraph{Break-even analysis.}
+For the dynamic approach to match the pure unitary approach at $N=17$, the per-step fidelity must reach:
+\begin{equation}
+F_\text{step}^\text{required} = (0.389)^{1/17} \approx 0.946
+\end{equation}
+Solving for the required feedback latency:
+\begin{equation}
+T_\text{fb}^\text{required} = -T_2 \ln\left(\frac{0.946}{F_\text{gate} \times F_\text{meas}}\right) \approx 8\,\mu\text{s}
+\end{equation}
+Current hardware operates at $\sim$34\,$\mu$s---more than four times too slow.
+
+\paragraph{Fundamental physical bound.}
+The measurement tax of mid-circuit measurement arises from two distinct physical mechanisms that must be carefully separated.
+
+\emph{Projection} is a consequence of quantum measurement theory: measuring a qubit projects its state onto a classical basis, irreversibly destroying the coherence of the measured mode.
+This is not an engineering limitation but a fundamental property of quantum mechanics.
+For the specific case considered here---direct measurement of an active computational qubit (the control qubit in a conditional operation)---projection eliminates the coherent information that subsequent operations depend on.
+
+\emph{Feedback latency} ($T_\text{fb}$) is an engineering quantity: the time between measurement and conditional gate application, during which idle qubits decohere at rate $1/T_2$.
+This component can in principle be reduced by faster electronics, though it has a physical lower bound ($\gtrsim 100\,$ns) set by the dispersive readout mechanism---the time required to accumulate sufficient photons for state discrimination.
+
+The feedback latency cannot be reduced to zero.
+Even with ideal classical electronics, the measurement itself takes $\gtrsim 100\,$ns.
+Even in the limit of perfect measurement fidelity, the projection induced by measurement is non-unitary and removes coherence from the measured mode.
+Combined with the current hardware readout noise ($F_\text{meas} \approx 0.99$), the per-step fidelity has a hard floor:
+\begin{equation}
+F_\text{step}^\text{dyn} \geq F_\text{gate} \times F_\text{meas} \times e^{-T_\text{fb}^\text{min}/T_2} \approx 0.995 \times 0.99 \times 0.9995 \approx 0.985
+\end{equation}
+After $N$ steps, the accumulated loss is $0.985^N$, which reaches 50\% at $N \approx 46$.
+The pure unitary approach, which extracts no classical information during execution, has no such floor.
+Its per-step fidelity is limited only by gate errors ($F_\text{gate} \approx 0.995$), reaching 50\% at $N \approx 138$.
+
+We emphasize the scope of this claim.
+Our argument applies to the direct measurement of active computational qubits during algorithmic execution---the configuration used in all current dynamic circuit implementations.
+In scenarios where measurement is performed on auxiliary qubits (e.g., ancilla-based syndrome extraction in QEC), the quantitative advantage may diminish; however, the qualitative overhead---readout infidelity and feedback-induced idling errors on the data qubits---persists as a decoherence channel.
+The advantage of pure unitary is therefore rooted in the physics of quantum measurement when applied to the computational path; its magnitude on any specific hardware is modulated by engineering parameters, but its direction is not.
+
+\paragraph{Generality: arbitrary controlled unitaries.}
+Our experiment uses conditional $X$ gates ($d = 1$).
+For a general quantum algorithm, the conditional operation may be a deeper unitary $U$ with gate depth $d$.
+The per-step fidelity for the dynamic approach becomes:
+\begin{equation}
+F_\text{step}^\text{dyn} = F_\text{gate}^d \times F_\text{meas} \times e^{-T_\text{fb}/T_2}
+\end{equation}
+and for the pure unitary approach:
+\begin{equation}
+F_\text{step}^\text{unitary} = F_\text{gate}^d
+\end{equation}
+Their ratio is:
+\begin{equation}
+\frac{F_\text{step}^\text{unitary}}{F_\text{step}^\text{dyn}} = \frac{1}{F_\text{meas} \times e^{-T_\text{fb}/T_2}} \approx 1.20
+\label{eq:ratio}
+\end{equation}
+This ratio is independent of $d$: the measurement tax is a constant multiplicative factor that does not scale with the depth of the controlled operation.
+A deeper $U$ reduces both approaches equally (both suffer $F_\text{gate}^d$), but the pure unitary approach retains a fixed $\sim$20\% per-step advantage from avoiding measurement and feedback.
+After $N$ conditional operations, the cumulative advantage is $(1.20)^N$---at $N = 17$, this gives $1.20^{17} \approx 19.6\times$, consistent with our measured $9.49\times$; at $N = 23$, the theoretical prediction is $1.20^{23} \approx 66\times$, consistent with our measured $43\times$.
+The theoretical ratio exceeds the measured value because the idealized model treats noise sources as independent multiplicative factors, whereas real hardware exhibits correlated errors (gate cross-talk, state-preparation imperfections, spectator qubit decoherence) that partially affect both approaches and compress the ratio.
+The trend---monotonically growing advantage with $N$---is what matters, and it is robust to model assumptions.
+The conclusion is general: the advantage does not depend on the specific gate being controlled, nor on the algorithm's branching structure.
+It depends only on the hardware's measurement and feedback parameters---quantities that are fixed by the physics of dispersive readout.
+
+\paragraph{Generalized decision boundary.}
+The experimental comparison above measures the measurement tax incurred by mid-circuit measurement.
+This penalty can be expressed in terms of an equivalent gate-error budget.
+Let the unitary path compile the conditional operation as a controlled-$U$ with gate-count expansion factor~$c$ (i.e., the controlled-$U$ circuit has depth $c\cdot d$, where $d$ is the depth of the bare unitary~$U$).
+The dynamic path executes $U$ unconditionally after a mid-circuit measurement and feedback.
+
+The unitary path wins over the dynamic path when its accumulated gate errors remain below the measurement tax:
+\begin{equation}
+F_{\text{eff}}^{(c-1)d} > F_{\text{meas}} \cdot e^{-T_{\text{fb}}/T_2},
+\label{eq:unitary_threshold}
+\end{equation}
+where $F_{\text{eff}}$ is the effective average fidelity of the gates introduced by the controlled compilation path---including SWAP routing, ancilla operations, and non-native decompositions---rather than the global chip-average gate fidelity.
+For native CNOT (this experiment, $c = 1$), the controlled path adds no auxiliary operations, so $F_{\text{eff}} = F_{\text{gate}}$, and the criterion reduces to
+\begin{equation}
+(c-1)\,d < \frac{|\ln \mathcal{T}|}{|\ln F_{\text{eff}}|} \approx 36 \quad (\text{for } F_{\text{eff}} = F_{\text{gate}} = 0.995).
+\end{equation}
+Notably, the qubit count $N_{\text{phys}}$ does not appear explicitly in this criterion; it enters only indirectly through $F_{\text{eff}}(N_{\text{phys}})$.
+For the 156-qubit Heron processor, the measured $F_{\text{gate}} \approx 0.995$ already incorporates the cross-talk and frequency congestion of a large chip.
+When the controlled synthesis requires SWAP chains or ancilla gates, $F_{\text{eff}}$ is typically lower than $F_{\text{gate}}$, and the threshold shrinks accordingly; the compiler should use a path-specific error estimate rather than the global average.
+This provides a practical physics-based rule for compiler design: unitary compilation outperforms measurement-feedback execution whenever the overhead of making $U$ controlled consumes fewer than $|\ln\mathcal{T}|/|\ln F_{\text{eff}}|$ additional effective gates per layer of~$U$.
+For shallow operations ($d=1$, $F_{\text{eff}} = 0.995$), this permits up to $36\times$ decomposition overhead, consistent with the CNOT gate studied in this work.
+For deeper subroutines or lower $F_{\text{eff}}$, the overhead budget shrinks proportionally.
+The threshold is not a fixed constant: it scales inversely with the effective per-gate error rate, and will expand rapidly as hardware gate fidelities improve.
+
+A second-order concern merits explicit acknowledgment.
+The extra gate depth $(c{-}1)d$ increases total execution time, potentially extending $T_2$-decoherence across the entire qubit register, including the qubits participating in the bare~$U$.
+In the fidelity comparison, however, the decoherence over the bare~$U$ portion ($e^{-t_U/T_2}$) cancels identically between the two paths; only the residual times differ: $t_{\text{overhead}}$ (unitary) vs.\ $T_{\text{fb}}$ (dynamic).
+Since $t_{\text{overhead}}$ is typically far smaller than $T_{\text{fb}} \approx 34\,\mu$s for circuits of moderate depth, this second-order correction favors the unitary path.
+Moreover, $F_{\text{eff}}$ as measured by randomized benchmarking already absorbs the decoherence occurring during gate execution, avoiding double-counting.
+For extreme-depth circuits where total execution time approaches the coherence limit, a separate treatment of non-Markovian ($1/f$) noise accumulation may be required; such circuits, however, would also be fatal to the dynamic path due to its larger total physical time.
+
+Our conclusion rests on two independent pillars.
+The first is the physical principle demonstrated here: mid-circuit measurement introduces a measurement tax ($\mathcal{T} = F_\text{meas} \times e^{-T_\text{fb}/T_2}$) that is absent in pure unitary circuits, and this tax compounds with circuit depth.
+On current hardware, this penalty drives the dynamic approach below~50\% fidelity by $N \approx 4$ (the operational breakpoint $N^*$), while the pure unitary approach remains above~90\%.
+The second is the compilation framework (Section~\ref{sec:compilation}): all four control structures (for, if, switch, while) can be compiled to pure unitary circuits for quantum algorithms---a mathematical result that holds regardless of hardware noise.
+The experiment validates the first pillar on real hardware; the second stands on its own as a proof.
+Together, they establish that classical control flow is eliminable for quantum algorithms, and that its elimination yields a measurable advantage rooted in measurement physics.
+
+\section{Discussion}
+
+The quantum compilation community has long relied on informal heuristics---``use dynamic circuits for branching,'' ``use unitary for depth-sensitive circuits''---without a quantitative criterion for when each strategy is optimal.
+The threshold $(c{-}1)d < |\ln\mathcal{T}|/|\ln F_{\text{eff}}|$ resolves this: it converts a subjective design choice into a calculable inequality.
+The number~36 (for current IBM Heron hardware) is not a parameter estimate; it is a \emph{physical constant} of the platform---the measurement tax expressed in units of gate errors.
+As gate fidelity improves, this constant grows exponentially (Table~\ref{tab:threshold}), expanding the unitary-favored region and eventually rendering dynamic execution obsolete at all depths.
+This is not an incremental improvement to dynamic circuit optimization; it is a \emph{paradigm shift}: the measurement tax is fixed by physics, while the gate error is an engineering variable---an asymmetry that hardware progress amplifies rather than resolves.
+
+The threshold derived above scales with gate fidelity.
+Since the measurement tax $\mathcal{T} = F_{\text{meas}} \cdot e^{-T_{\text{fb}}/T_2}$ is largely fixed by the physics of projective readout and the speed of light, while $-\ln F_{\text{eff}}$ is a technology parameter that has improved exponentially over the past decade, the general threshold is
+\begin{equation}
+(c-1)d < \frac{|\ln \mathcal{T}|}{|\ln F_{\text{eff}}|}.
+\end{equation}
+For native CNOT gates, $F_{\text{eff}} = F_{\text{gate}}$ and the threshold is~36 under current IBM Heron parameters.
+For controlled operations requiring SWAP chains or ancilla gates, $F_{\text{eff}} < F_{\text{gate}}$ and the threshold shrinks accordingly; this is physically expected and correctly captured by the formula.
+The scaling table and figure below use the global gate fidelity $F_{\text{gate}}$ to illustrate the hardware trajectory---for native gates, this is also the effective path fidelity.
+Should gate fidelity reach $99.99\%$ ($F_{\text{gate}}=0.9999$)---a realistic near-term target---the threshold expands to approximately~1800.
+At that level, unitary compilation becomes viable for deep algorithmic subroutines that today would require dynamic measurement.
+Table~\ref{tab:threshold} illustrates this scaling: the unitary-favored region grows exponentially with gate fidelity, implying that hardware progress naturally amplifies the advantage of coherent control over measurement-feedback.
+
+\begin{table}[!t]
+\centering
+\caption{Decision threshold $(c-1)d$ as a function of gate fidelity, assuming current IBM measurement parameters ($F_{\text{meas}}=0.99$, $T_{\text{fb}}/T_2=0.17$).}
+\begin{tabular}{c|c|c}
+\hline
+$F_{\text{gate}}$ & $|\ln F_{\text{gate}}|$ & $\text{Threshold} = |\ln\mathcal{T}| / |\ln F_{\text{gate}}|$ \\
+\hline
+0.995 (current) & $5.0\times 10^{-3}$ & 36 \\
+0.999 (near-term) & $1.0\times 10^{-3}$ & 180 \\
+0.9999 (2030s) & $1.0\times 10^{-4}$ & 1800 \\
+0.999999 (fault-tolerant) & $1.0\times 10^{-6}$ & $1.8\times 10^{5}$ \\
+\hline
+\end{tabular}
+\label{tab:threshold}
+\end{table}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=0.8\linewidth]{threshold_scaling.pdf}
+\caption{Scaling of the unitary-vs-dynamic decision boundary with gate fidelity.
+The shaded region ($(c{-}1)d < \text{threshold}$) represents the parameter space where unitary compilation outperforms dynamic circuits.
+The vertical dashed lines indicate the current IBM Heron operating point (99.5\%) and a realistic near-term target (99.99\%).}
+\label{fig:threshold}
+\end{figure}
+
+\paragraph{Why $N_{\text{phys}}$ does not appear in the decision boundary.}
+The absence of $N_{\text{phys}}$ from Equation~\ref{eq:unitary_threshold} is among the most counter-intuitive engineering conclusions of this work.
+In conventional error-budget analyses, larger chips carry more cross-talk, denser frequency spectra, and lower average gate fidelity---and these effects are real, entering the threshold through $F_{\text{eff}}(N_{\text{phys}})$ in the denominator.
+However, once $F_{\text{eff}}(N_{\text{phys}})$ is given as an input---whether measured on a~5-qubit device or a~1000-qubit chip---the pure-unitary-vs-dynamic decision depends solely on the compilation overhead $(c{-}1)d$.
+A compiler choosing between unitary and dynamic execution need not ask ``how many qubits does this algorithm use?''; it need only ask ``how many extra gates does making~$U$ controlled cost, and at what effective fidelity?''.
+The qubit count~$N_{\text{phys}}$ operates at the hardware-design layer---determining how high $F_{\text{eff}}$ can be sustained---while~$c$ operates at the compilation layer---determining how efficiently a controlled operation is synthesized.
+This separation defines a clean hardware--compiler co-design interface.
+
+\begin{table}[!t]
+\centering
+\caption{Role comparison: $N_{\text{phys}}$ (hardware environment), $c$ (compiler control), and $F_{\text{eff}}$ (path fidelity).}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Variable & Physical meaning & Entry in threshold & Impact on decision \\
+\midrule
+$N_{\text{phys}}$ & Chip scale (qubit count) & Indirect via $F_{\text{eff}}(N_{\text{phys}})$ & Larger $N_{\text{phys}}$ $\to$ lower $F_{\text{eff}}$ $\to$ smaller threshold \\
+$c$ & Compilation overhead & Explicit in $(c{-}1)d$ & Larger $c$ $\to$ harder for unitary to win \\
+$F_{\text{eff}}$ & Path-specific fidelity & Denominator of threshold & Lower $F_{\text{eff}}$ (e.g.\ SWAP chains) $\to$ smaller threshold \\
+\bottomrule
+\end{tabular}
+\label{tab:role_comparison}
+\end{table}
+
+The practical upshot (Table~\ref{tab:role_comparison}): compiler engineers should minimize~$c$ and maximize~$F_{\text{eff}}$ through optimized controlled-gate synthesis and routing, while hardware engineers should sustain high baseline gate fidelity at scale---all connected by the same threshold formula.
+For the 156-qubit Heron processor measured here, $F_{\text{gate}} \approx 0.995$ already reflects the indirect cost of $N_{\text{phys}} = 156$; for native CNOT, $F_{\text{eff}} = F_{\text{gate}}$.
+For smaller chips ($N_{\text{phys}} < 50$), $F_{\text{gate}}$ is typically higher and the threshold exceeds~36; for future large-scale chips ($N_{\text{phys}} > 1000$), $F_{\text{gate}}$ may decrease and the threshold will shrink.
+The framework presented here allows any platform to compute its own threshold by substituting its measured~$F_{\text{eff}}$.
+
+\subsection{The Decision Boundary in Context}
+
+Our results demonstrate that the choice between dynamic and pure unitary execution is not a matter of model completeness but of physical economics.
+The classical-quantum hybrid model~\cite{deutsch1985,ibm_dynamic,openqasm3} is mathematically complete and computationally equivalent to the pure unitary model; the Deutsch 1985 reference establishes this equivalence.
+The question we address is implementational: for a given circuit depth and hardware generation, which execution strategy yields higher fidelity?
+
+The answer is governed by an asymmetry that deepens with hardware progress.
+Gate fidelity improves with materials engineering---better fabrication, calibration, and control electronics---and the trajectory is exponential ($1 - F_\text{gate}$ has decreased by roughly an order of magnitude per hardware generation in superconducting platforms).
+Measurement fidelity, by contrast, is bounded below by the physics of dispersive readout: extracting classical information from a quantum system necessarily projects the measured mode onto a classical basis, destroying coherence irreversibly.
+Feedback latency has a physical floor ($\gtrsim 100\,$ns) set by the photon-accumulation time required for state discrimination, and even at this limit, all idle qubits decohere during the feedback window.
+The per-step fidelity ratio (Equation~\ref{eq:ratio}) is therefore not a fixed constant but a \emph{widening} function of hardware generation: as $F_\text{gate} \to 1$, the numerator of the ratio stays near 1 while the denominator remains bounded by $F_\text{meas} \times e^{-T_\text{fb}^\text{min}/T_2} < 1$.
+The consequence is that $N^*$---the depth above which pure unitary execution is strictly superior---trends toward zero.
+
+This finding resonates with a broader principle in quantum control theory.
+Jacobs et al.~\cite{jacobs2014} established the theoretical superiority of coherent control in quantum measurement theory, showing that coherent feedback protocols exploit geodesic paths in Hilbert space that measurement-based protocols cannot follow.
+Our work provides the first experimental quantification of this advantage at the algorithmic compilation layer: the per-step fidelity ratio of $\sim$1.20 is a direct manifestation of the geodesic-path advantage applied to conditional gate execution.
+
+The cost of mid-circuit measurement is increasingly recognized as a practical concern.
+Harper et al.~\cite{harper2026} identified MCM-induced idling noise as the primary failure mechanism on IBM Heron; benchmarking protocols~\cite{hothem2025} have been developed to quantify MCM error rates; and optimization frameworks~\cite{mcm_opt2025} have been proposed to minimize the number of mid-circuit measurements in compiled circuits.
+These efforts mitigate the cost; our work identifies the regime where eliminating the cost entirely is the optimal strategy.
+
+On the compilation side, quantum control flow has been formalized in languages such as Qunity~\cite{mints2025}, and executable on quantum virtual machines~\cite{qvm2025}.
+Existing compilers (Qiskit~\cite{qiskit}, QuoNic~\cite{quonic2026}) support mid-circuit measurement as a compilation target.
+None of these prior works have provided a hardware-aware criterion for when to choose pure unitary over dynamic execution, nor validated such a criterion experimentally.
+
+\subsection{Measurement-Free Quantum Error Correction}
+
+The same physical economics extends to the error-correction layer.
+Measurement-free QEC protocols~\cite{barrett2010fault,paetznick2013,chamberland2022cat} replace the classical syndrome-decode-correct cycle with coherent operations: controlled-NOT gates copy error information from data qubits into syndrome qubits without collapsing the data state, and multi-controlled unitary gates apply corrections conditioned on the syndrome.
+Recently, Butt et al.~\cite{butt2026} demonstrated measurement-free fault-tolerant logical operations on a trapped-ion processor (Nat.\ Commun.\ 2026), establishing the experimental feasibility of avoiding mid-circuit measurements at the QEC layer.
+Veroni et al.~\cite{veroni2025} proposed a scalable measurement-free correction protocol using Bacon-Shor codes, and adapted variants have been designed for biased-noise platforms~\cite{mfnbiased2025} and neutral-atom hardware~\cite{locher2026}.
+The entire process remains unitary; measurement occurs only at final readout.
+The strategy bifurcation criterion applies identically: coherent QEC wins when $F_\text{gate}^{d} > F_\text{meas} \times e^{-T_\text{fb}/T_2}$, where $d$ is the extra gate depth of the coherent path.
+For current IBM parameters, this gives $d < 37$ gates.
+Combined with our result (algorithmic control flow compiles to pure unitary), this points toward a unified control strategy---algorithm and error correction both---that defaults to pure unitary execution, with measurement only at final readout.
+This is not yet practical, but it establishes that the strategy bifurcation extends to the full quantum computing stack.
+
+\subsection{Scope and Limitations}
+
+Our analysis applies to \textbf{self-contained quantum algorithms}---computations whose quantum execution has a fixed gate structure, with control flow determined by quantum predicates retained coherently, and semantics defined by final measurement outcomes.
+This includes Grover's search~\cite{grover1996}, Shor's factoring, QPE, quantum simulation, and their variants.
+For such algorithms, the conditional depth $N$ is known at compile time, and the strategy bifurcation criterion applies directly.
+
+\textbf{Hybrid classical-quantum programs} (VQE, QAOA, QML) have classical outer loops whose iteration count depends on runtime convergence; these loops cannot be statically expanded.
+However, their quantum inner subroutines---the ansatz, the oracle, the amplitude amplification---have fixed conditional depth and benefit from pure unitary execution when $N > N^*$.
+The classical outer loop runs on a classical computer and submits unitary circuits as subroutines.
+
+For the \texttt{groverize()} compilation of \texttt{while} loops, the success probability $p = |\langle \text{success} | U | \text{initial} \rangle|^2$ must be known.
+For standard quantum algorithms, $p$ is structurally determined (Grover: $p = 1/N$; Shor: computable classically; QPE: known from the problem specification).
+For circuits with $n > 24$ qubits and non-Clifford gates, computing $p$ requires exponential statevector simulation; \texttt{groverize()} falls back to native execution in such cases.
+This limits the applicability of the \texttt{while}-to-unitary compilation to algorithms where $p$ is computable, but does not affect the strategy bifurcation for \texttt{for}/\texttt{if}/\texttt{switch}, which have no such requirement.
+
+Several additional limitations warrant discussion.
+First, our experiments use a single hardware platform (IBM Heron); the fundamental asymmetry---measurement adds noise, gates do not---is platform-independent, but the quantitative value of $N^*$ is hardware-specific.
+Second, our test program uses conditional $X$ gates ($d = 1$); the compilation framework applies to arbitrary controlled unitaries, and the per-step fidelity ratio is independent of $d$ (Equation~\ref{eq:ratio}).
+Third, our strategy bifurcation analysis assumes static conditional depth; for circuits where the depth itself is data-dependent (e.g., iterative refinement with runtime termination), the criterion requires adaptation.
+Fourth, our analysis addresses mid-circuit measurement for classical control flow specifically; measurement-based quantum computation~\cite{raussendorf2001}, where measurement is the computational primitive, operates under a different model.
+However, MBQC is not a counter-example but a corroboration.
+In the one-way model, measurements are confined to resource-state qubits that have already discharged their entangling role; the data-carrying correlations---the coherent information that encodes the computation---are never directly measured until final readout.
+This architectural separation between ``measure here, protect there'' is precisely the physical principle our work formalizes: measurement on the active computational path destroys coherence irreversibly, and successful quantum architectures---whether pure unitary or MBQC---arrange their circuits to avoid it.
+The two paradigms differ in mechanism (coherent control vs.\ resource-state isolation) but converge on the same physics: keep measurement off the data path.
+
+Our projection $N^* \to 0$ assumes the observed hardware trajectory continues: gate fidelity improves with materials engineering while feedback latency is constrained by the dispersive readout mechanism ($\gtrsim 100\,$ns) and the irreducible projection cost of quantum measurement.
+This trajectory is not a physical law but an engineering observation; however, the asymmetry it relies on---gate errors are addressable by engineering, measurement projection is not---is grounded in quantum mechanics and would require a fundamentally new readout paradigm to overturn.
+
+The threshold analysis above (Equation~\ref{eq:unitary_threshold}) generalizes the conclusion to arbitrary~$U$: the unitary advantage holds as long as $(c-1)d < |\ln\mathcal{T}|/|\ln F_{\text{eff}}|$ under the relevant hardware parameters, where $F_{\text{eff}}$ is the path-specific effective fidelity of the controlled compilation.
+This condition is satisfied for a wide range of practical circuits where the controlled version of~$U$ can be synthesized with moderate overhead; it will be violated only for very deep~$U$ with large compilation expansion factors.
+Therefore, the claim is not that unitary compilation universally beats dynamic execution for all possible controlled unitaries, but rather that the measurement-feedback penalty is a fixed, non-amortizable cost that can be used as a benchmark: any compilation strategy that keeps $(c-1)d$ below the hardware-dependent threshold will outperform the dynamic alternative.
+
+\subsection{Conclusion}
+
+The classical-quantum hybrid model of computation is mathematically complete and will remain so.
+Our contribution is a physical economics analysis of its implementation cost: mid-circuit measurement imposes a measurement tax rooted in the physics of quantum projection and feedback-induced decoherence, while gate fidelity improves with materials engineering unencumbered by this tax.
+We have measured the resulting operational breakpoint on current hardware ($N^* \approx 4$: the dynamic approach drops below~50\% fidelity), verified the predicted monotonic divergence to $N = 31$, and shown that pure unitary execution is advantageous at every depth.
+For quantum compilers, the threshold $(c{-}1)d < |\ln\mathcal{T}|/|\ln F_{\text{eff}}|$ provides a quantitative decision rule: substitute the path-specific effective fidelity and minimize the controlled-gate overhead~$c$.
+For hardware designers, it identifies the asymmetric return on investment: every improvement in gate fidelity makes the measurement tax relatively more severe, ensuring that the pure unitary advantage persists and grows.
+The question is no longer whether classical control flow can be made faster---it is whether it should be used at all.
+
+\section{Methods}
+
+\paragraph{Notation.}
+We distinguish three variables that play fundamentally different roles in the decision boundary.
+$N_{\text{phys}}$ denotes the number of physical qubits on the processor (e.g., $N_{\text{phys}} = 156$ for IBM Heron).
+It does not appear explicitly in the threshold formula (Equation~\ref{eq:unitary_threshold}); instead, $N_{\text{phys}}$ influences the decision indirectly by degrading the effective fidelity through cross-talk and frequency congestion on larger chips.
+$c$ denotes the compilation overhead factor for making a unitary controlled: $c = (\text{compiled controlled-}U \text{ depth}) / (\text{bare } U \text{ depth})$, with $c \geq 1$.
+For a native CNOT gate (this experiment), $c = 1$; for a general $U$ compiled from the native gate set, $c$ depends on the gate set, routing topology, and ancilla availability.
+The variable $d$ is the gate depth of the bare unitary~$U$ before any controlled compilation.
+$F_{\text{eff}}$ denotes the effective average fidelity of the gates introduced by the controlled compilation path---including SWAP routing, ancilla operations, and non-native decompositions.
+For native CNOT gates, $F_{\text{eff}} = F_{\text{gate}}$; for complex controlled syntheses, $F_{\text{eff}}$ is typically lower and should be estimated from path-specific error budgets.
+
+\paragraph{Hardware.}
+All experiments use IBM ibm\_marrakesh, a 156-qubit Heron processor with:
+\begin{itemize}
+  \item Two-qubit (CZ) gate fidelity: $\sim$99.5\%
+  \item Measurement fidelity: $\sim$99\%
+  \item $T_2$ coherence time: $\sim$200\,$\mu$s
+  \item Feedback latency: $\sim$34\,$\mu$s (inferred from data)
+\end{itemize}
+
+\paragraph{Qubit layout.}
+A connected chain of 18 physical qubits: [0, 1, 2, \ldots, 15, 19, 35].
+For each $N$, the first $N+1$ qubits in this chain are used.
+The layout is identical for dynamic and pure unitary circuits, ensuring fair comparison.
+
+\paragraph{Error mitigation.}
+Dynamical decoupling and twirling (gates and measurement) are disabled to isolate the effect of mid-circuit measurement vs pure unitary execution.
+No post-processing or error mitigation is applied.
+
+\paragraph{Experimental design: deterministic control qubit.}
+This is standard experimental physics: vary one factor (mid-circuit measurement vs.\ coherent control), control all others (hardware, layout, calibration, gate sequence).
+We use a deterministic control qubit (always $|1\rangle$) to isolate the noise contribution of mid-circuit measurement itself.
+The three noise sources---readout error ($F_\text{meas}$), feedback latency ($T_\text{fb}$), and decoherence during feedback ($e^{-T_\text{fb}/T_2}$)---are hardware properties: the dispersive readout process, the classical feedback pipeline, and qubit decoherence operate identically regardless of whether the measurement outcome is deterministic or random.
+By fixing the outcome, we eliminate confounding variables---branch-dependent gate sequences, state collapse randomness, conditional logic overhead---and attribute the fidelity difference solely to the measurement-feedback cycle.
+The compilation of nondeterministic branches into controlled unitaries is a separate concern, addressed by the compilation framework (Section~\ref{sec:compilation}); the correctness of a CNOT applied to a control qubit in superposition follows from linearity and requires no experimental verification.
+
+\paragraph{Statistical methods.}
+Each data point uses 4000 shots.
+95\% confidence intervals are computed using the Wilson score interval.
+All differences are statistically significant ($p < 0.05$) for $N \leq 17$.
+
+\paragraph{Data availability.}
+All experimental data and analysis code are available at \href{https://github.com/ChrisLee0721/pure-unitary-vs-dynamic}{github.com/ChrisLee0721/pure-unitary-vs-dynamic}.
+
+\begin{thebibliography}{99}
+\bibitem{deutsch1985} Deutsch, D. Quantum theory, the Church--Turing principle and the universal quantum computer. \textit{Proc. R. Soc. Lond. A} \textbf{400}, 97--117 (1985).
+\bibitem{ibm_dynamic} IBM Quantum. Dynamic circuits. \textit{IBM Documentation} \href{https://docs.quantum.ibm.com/build/dynamic-circuits}{docs.quantum.ibm.com/build/dynamic-circuits} (2023).
+\bibitem{ibm_blog2025} IBM Quantum. Dynamic circuits enable efficient long-range entanglement. \textit{IBM Quantum Computing Blog} (2025).
+\bibitem{openqasm3} Cross, A. W. \textit{et al.} OpenQASM 3: A broader and deeper quantum assembly language. \textit{ACM Trans. Quantum Comput.} \textbf{3}, 1--50 (2022).
+\bibitem{nielsen2010} Nielsen, M. A. \& Chuang, I. L. \textit{Quantum Computation and Quantum Information} (Cambridge Univ. Press, 2010).
+\bibitem{grover1996} Grover, L. K. A fast quantum mechanical algorithm for database search. \textit{Proc. 28th ACM STOC} 212--219 (1996).
+\bibitem{butt2026} Butt, F. \textit{et al.} Demonstration of measurement-free universal logical quantum computation. \textit{Nat. Commun.} \textbf{17}, 995 (2026).
+\bibitem{veroni2025} Veroni, S. \textit{et al.} Universal quantum computation via scalable measurement-free error correction. \textit{PRX Quantum} (2025).
+\bibitem{mfnbiased2025} Measurement-free quantum error correction optimized for biased noise. \textit{PRX Quantum} \textbf{6}, 040349 (2025).
+\bibitem{locher2026} Locher, D. F. \textit{et al.} Multiqubit Rydberg gates for quantum error correction. \textit{PRX Quantum} \textbf{7}, 020354 (2026).
+\bibitem{harper2026} Harper, R. \textit{et al.} Characterising the failure mechanism of error-corrected quantum logic gates. \textit{Nat. Commun.} (2026).
+\bibitem{hothem2025} Hothem, D. \textit{et al.} Measuring error rates of mid-circuit measurements. \textit{Nat. Commun.} \textbf{16}, 5761 (2025).
+\bibitem{mcm_opt2025} Optimization framework for reducing mid-circuit measurements and resets. \textit{Proc. ICCS} (2025).
+\bibitem{jacobs2014} Jacobs, K., Wang, X. \& Wiseman, H. M. Coherent feedback that beats all measurement-based feedback protocols. \textit{New J. Phys.} \textbf{16}, 073036 (2014).
+\bibitem{mints2025} Mints, G. \textit{et al.} Compositional quantum control flow with efficient compilation in Qunity. \textit{Proc. ACM Program. Lang.} (2025).
+\bibitem{qvm2025} A quantum virtual machine for execution of oracles. \textit{Proc. HPDC} (2025).
+\bibitem{barrett2010fault} Barrett, S. D. \& Stace, T. M. Fault tolerant quantum computation with very high threshold for loss errors. \textit{Phys. Rev. Lett.} \textbf{105}, 200502 (2010).
+\bibitem{chamberland2022cat} Chamberland, C. \textit{et al.} Building a fault-tolerant quantum computer using concatenated cat codes. \textit{PRX Quantum} \textbf{3}, 030341 (2022).
+\bibitem{paetznick2013} Paetznick, A. \& Reichardt, B. W. Universal fault-tolerant quantum computation with only transversal gates and error correction. \textit{Phys. Rev. Lett.} \textbf{111}, 090505 (2013).
+\bibitem{quonic2026} Lee, L.-Y. QuoNic: A backend-agnostic quantum middleware with intelligent scheduling and dynamic-to-static compilation. \textit{Zenodo} \href{https://doi.org/10.5281/zenodo.22302290}{10.5281/zenodo.22302290} (2026).
+\bibitem{raussendorf2001} Raussendorf, R. \& Briegel, H. J. A one-way quantum computer. \textit{Phys. Rev. Lett.} \textbf{86}, 5188--5191 (2001).
+\bibitem{qiskit} Qiskit contributors. Qiskit: An open-source framework for quantum computing. \textit{Quantum} \textbf{7}, 1069 (2023).
+\end{thebibliography}
+
+\end{document}

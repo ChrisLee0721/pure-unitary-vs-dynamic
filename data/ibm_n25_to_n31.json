@@ -1,0 +1,34 @@
+{
+  "25": {
+    "p_dynamic": 0.0,
+    "p_groverize": 0.04925,
+    "dyn_depth": 52,
+    "grov_depth": 240,
+    "abs_diff": 0.04925,
+    "relative": ">12"
+  },
+  "27": {
+    "p_dynamic": 0.0,
+    "p_groverize": 0.0235,
+    "dyn_depth": 56,
+    "grov_depth": 247,
+    "abs_diff": 0.0235,
+    "relative": ">12"
+  },
+  "29": {
+    "p_dynamic": 0.0,
+    "p_groverize": 0.00875,
+    "dyn_depth": 60,
+    "grov_depth": 265,
+    "abs_diff": 0.00875,
+    "relative": ">12"
+  },
+  "31": {
+    "p_dynamic": 0.0,
+    "p_groverize": 0.009,
+    "dyn_depth": 64,
+    "grov_depth": 267,
+    "abs_diff": 0.009,
+    "relative": ">12"
+  }
+}
